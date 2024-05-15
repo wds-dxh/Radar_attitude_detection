@@ -26,6 +26,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print('device', device)
 
 from torchvision import transforms
+writer = SummaryWriter('logs_train')
 
 # 训练集图像预处理：缩放裁剪、图像增强、转 Tensor、归一化
 train_transform = transforms.Compose([transforms.RandomResizedCrop(224),#224*224
@@ -67,7 +68,7 @@ idx_to_labels = {y:x for x,y in train_dataset.class_to_idx.items()}
 np.save('idx_to_labels.npy', idx_to_labels)
 np.save('labels_to_idx.npy', train_dataset.class_to_idx)
 
-BATCH_SIZE = 128
+BATCH_SIZE = 1280    
 
 # 训练集的数据加载器
 train_loader = DataLoader(train_dataset,
@@ -90,11 +91,14 @@ model.fc = nn.Linear(model.fc.in_features, n_class)
 # model = torch.load('checkpoints/mymodel/zzsb.pth', map_location=torch.device('cuda'))
 # model = model.CNN_easy(4)
 # optimizer = optim.Adam(model.fc.parameters())  # 只优化全连接层的参数
+#加载模型训练过的模型，继续训练
+# model = torch.load('Radar_attitude_detection.pth')
 learning_rate = 5e-3
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)#优化器
 model = model.to(device)
+init_image = torch.zeros((1, 3, 224, 224)).to(device)
+writer.add_graph(model, init_image)
 
-writer = SummaryWriter('logs_train')
 #启动tensorboard
 # tensorboard --logdir=logs_train
 #安装tensorboard，pip install tensorboard -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -110,24 +114,23 @@ for epoch in tqdm(range(EPOCHS)):
         outputs = model(images)  # 前向预测，获得当前 batch 的预测结果
         loss = criterion(outputs, labels)  # 比较预测结果和标注，计算当前 batch 的交叉熵损失函数
         writer.add_scalar('Loss/train', loss.item(), epoch) # 记录训练损失
-
-
         optimizer.zero_grad()
         loss.backward()  # 损失函数对神经网络权重反向传播求梯度
         optimizer.step()  # 优化更新神经网络权重
+    
     # 测试集上的准确率
     model.eval()
     with torch.no_grad():# 不计算梯度
         correct = 0
         total = 0
-        for images, labels in tqdm(test_loader): # 获取测试集  的一个 batch，包含数据和标注
+        for images, labels in test_loader: # 获取测试集  的一个 batch，包含数据和标注
             images = images.to(device)
             labels = labels.to(device)
             outputs = model(images)              # 前向预测，获得当前 batch 的预测置信度
             _, preds = torch.max(outputs, 1)     # 获得最大置信度对应的类别，作为预测结果
             total += labels.size(0)
             correct += (preds == labels).sum()   # 预测正确样本个数
-            writer.add_scalar('Accuracy/test', 100 * correct / total, epoch)  # 记录测试准确率
+        writer.add_scalar('Accuracy', 100 * correct / total, epoch)  # 记录测试准确率
         print('测试集上的准确率为 {:.3f} %'.format(100 * correct / total))
         if correct > correct_over:
             torch.save(model, './Radar_attitude_detection.pth')
